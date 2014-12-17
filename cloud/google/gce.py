@@ -96,6 +96,13 @@ options:
     default: null
     aliases: []
     version_added: "1.7"
+  external_ips:
+    description:
+      - a list of IP to attach to the instances; each element will be used for a new instance. Pass in a static IP's name for attach it or 'ephemeral' (default) for a new non-static address. If there is not enough specidifed IP, 'ephemeral' will be used.
+    required: false
+    default: []
+    aliases: []
+    version_added: "1.7"
   state:
     description:
       - desired state of the resource
@@ -259,6 +266,7 @@ def create_instances(module, gce, instance_names):
     state = module.params.get('state')
     tags = module.params.get('tags')
     zone = module.params.get('zone')
+    external_ips = module.params.get('external_ips')
 
     new_instances = []
     changed = False
@@ -315,11 +323,18 @@ def create_instances(module, gce, instance_names):
                 pd = gce.create_volume(None, "%s" % name, image=lc_image)
             except ResourceExistsError:
                 pd = gce.ex_get_volume("%s" % name, lc_zone)
+        external_ip = external_ips.pop(0) if len(external_ips) != 0 else 'ephemeral'
+        if external_ip != 'ephemeral':
+            try:
+                external_ip = gce.ex_get_address(external_ip)
+            except GoogleBaseError, e:
+                module.fail_json(msg='Unexpected error attempting to get a ' + \
+                        'static ip %s, error: %s' % (external_ip, e.value))
         inst = None
         try:
             inst = gce.create_node(name, lc_machine_type, lc_image,
                     location=lc_zone, ex_network=network, ex_tags=tags,
-                    ex_metadata=metadata, ex_boot_disk=pd)
+                    ex_metadata=metadata, ex_boot_disk=pd, external_ip=external_ip)
             changed = True
         except ResourceExistsError:
             inst = gce.ex_get_node(name, lc_zone)
@@ -402,6 +417,7 @@ def main():
             network = dict(default='default'),
             persistent_boot_disk = dict(type='bool', default=False),
             disks = dict(type='list'),
+            external_ips = dict(type='list', default=[]),
             state = dict(choices=['active', 'present', 'absent', 'deleted'],
                     default='present'),
             tags = dict(type='list'),
